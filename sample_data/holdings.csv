@@ -1,0 +1,8 @@
+ticker,name,sector,asset_class,quantity,buy_price,current_price,holding_months
+TCS,Tata Consultancy Services,IT,Equity,4,2800.00,3400.00,24
+INFY,Infosys,IT,Equity,6,1500.00,1700.00,30
+HDFCBANK,HDFC Bank,Banks,Equity,10,900.00,1050.00,18
+NTPC,NTPC,Energy,Equity,10,150.00,270.00,12
+ITC,ITC,FMCG,Equity,30,240.00,248.00,20
+MM,Mahindra & Mahindra,Auto,Equity,1,4940.00,6400.00,15
+HDFCBOND,HDFC Corporate Bond Fund,Debt,Debt,100,30.00,32.00,60

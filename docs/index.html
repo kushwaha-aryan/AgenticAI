@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeenTitans — Portfolio Health Advisor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>TeenTitans Portfolio Advisor</h1>
+    <p class="tagline">Analyst &rarr; Risk &rarr; Advisor &rarr; Q&amp;A &middot; facts computed in your browser, reasoning by Groq LLM</p>
+  </header>
+
+  <main>
+    <div class="col-main">
+      <section class="card" id="setupCard">
+        <h2>1 &middot; Groq API key</h2>
+        <p class="hint">Free key at <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a>.
+        Keys are never stored in the repo — use the demo server's env key, or paste your own (browser localStorage only).</p>
+        <div class="seg">
+          <label><input type="radio" name="keySource" id="keySourceEnv" value="env" checked>
+            Use provided API key (demo server env / .env)</label>
+          <label><input type="radio" name="keySource" id="keySourceManual" value="manual">
+            Paste my own API key</label>
+        </div>
+        <div class="row">
+          <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off" disabled>
+          <button id="showKey" type="button" disabled>Show</button>
+        </div>
+        <p class="status" id="keyStatus"></p>
+      </section>
+
+      <section class="card">
+        <h2>2 &middot; Your holdings (CSV)</h2>
+        <p class="hint">Flexible header layout: common aliases accepted (e.g. <code>symbol</code> for ticker, <code>qty</code> for quantity,
+        <code>market price</code> for current_price, <code>months held</code> for holding_months).</p>
+        <textarea id="csvInput" rows="10" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="uploadBtn" type="button">Upload CSV</button>
+          <span id="uploadName" class="hint"></span>
+          <button id="loadSample" type="button">Load sample data</button>
+          <button id="analyze" type="button" class="primary">Analyze portfolio</button>
+          <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
+        </div>
+        <p class="hint">Missing or ambiguous headers? Let the model figure them out:</p>
+        <div class="row">
+          <button id="llmMapBtn" type="button" hidden>Try AI-assisted mapping</button>
+        </div>
+        <p id="parseMsg" class="msg"></p>
+      </section>
+
+      <section class="card" id="resultsCard" hidden>
+        <h2>3 &middot; Analysis <span class="badge">Analyst &rarr; Risk &rarr; Advisor &rarr; Q&amp;A</span></h2>
+        <p class="hint">Each agent passes its verified output to the next. Pick a tab to view that agent's report.</p>
+        <nav class="tabs" id="tabNav">
+          <button type="button" class="tab-btn active" id="tabAnalyst" aria-selected="true">1 &middot; Analyst</button>
+          <button type="button" class="tab-btn" id="tabRisk" aria-selected="false" disabled>2 &middot; Risk</button>
+          <button type="button" class="tab-btn" id="tabAdvisor" aria-selected="false" disabled>3 &middot; Advisor</button>
+          <button type="button" class="tab-btn" id="tabQa" aria-selected="false" disabled>4 &middot; Q&amp;A</button>
+        </nav>
+
+        <div class="tab-panel active" id="panelAnalyst" aria-hidden="false">
+          <pre class="verified" id="analystFacts"></pre>
+          <div class="narrative md" id="analystNarrative"></div>
+          <p class="status" id="analystStatus"></p>
+        </div>
+
+        <div class="tab-panel" id="panelRisk" aria-hidden="true">
+          <pre class="verified" id="riskFacts"></pre>
+          <div class="narrative md" id="riskNarrative"></div>
+          <p class="status" id="riskStatus"></p>
+        </div>
+
+        <div class="tab-panel" id="panelAdvisor" aria-hidden="true">
+          <div class="narrative md" id="advisorNarrative"></div>
+          <p class="status" id="advisorStatus"></p>
+        </div>
+
+        <div class="tab-panel" id="panelQa" aria-hidden="true">
+          <p class="hint">The conversation history persists across questions, so it remembers earlier answers too.</p>
+          <div class="row">
+            <input type="text" id="qaInput" placeholder="e.g. why is my risk high?">
+            <button id="qaSend" type="button" class="primary">Ask</button>
+          </div>
+          <div id="qaHistory"></div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="col-side">
+      <section class="card" id="visualsCard" hidden>
+        <h2>Portfolio visuals</h2>
+        <p class="hint">Computed from the same verified facts the agents use.</p>
+        <div id="visuals"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer>
+    <p><strong>Not personalized financial advice.</strong> The tax estimate is a simplified illustration
+    (assumes flat 10% LTCG / 20% STCG, no exemptions or set-offs).</p>
+  </footer>
+
+  <script src="js/tools.js"></script>
+  <script src="js/md.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/groq.js"></script>
+  <script src="js/agents.js"></script>
+  <script src="js/normalize.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
