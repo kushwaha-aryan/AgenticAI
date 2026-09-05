@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AgenticAI — Codebase Map</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --line:#2a2f3d; --text:#e6e8ee; --muted:#9aa1b0;
+    --file:#4C6EF5; --agent:#12B886; --func:#F59F00; --tool:#7048E8;
+    --frontend:#E64980; --server:#15AABF; --external:#868E96; --data:#c9a15a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+  #app{display:flex;height:100vh}
+  #graphWrap{flex:1;position:relative;overflow:hidden;cursor:grab}
+  #graphWrap.grabbing{cursor:grabbing}
+  svg{width:100%;height:100%;display:block}
+  .node rect{stroke:#000;stroke-opacity:.25;stroke-width:1;cursor:pointer;transition:filter .15s}
+  .node:hover rect{filter:brightness(1.25)}
+  .node.selected rect{stroke:#fff;stroke-width:2}
+  .node text{fill:#0b0d12;font-size:11px;font-weight:600;pointer-events:none;user-select:none}
+  .node .sub{fill:#0b0d12;font-size:8.5px;font-weight:400;opacity:.75}
+  .edge{fill:none;stroke:#5a6072;stroke-width:1.4;opacity:.75;marker-end:url(#arrow)}
+  .edge.highlight{stroke:#fff;stroke-width:2.4;opacity:1}
+  .edgeLabel{fill:var(--muted);font-size:9px}
+  #panel{width:340px;background:var(--panel);border-left:1px solid var(--line);padding:18px;overflow-y:auto}
+  #panel h2{margin:0 0 4px;font-size:16px;color:#fff}
+  #panel .tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+  #panel .path{font-family:monospace;font-size:11px;color:var(--muted);margin-bottom:14px;word-break:break-all}
+  #panel p{font-size:13px;line-height:1.55;color:#c9cdd8}
+  #panel h4{font-size:11px;color:var(--muted);text-transform:uppercase;margin:16px 0 6px;letter-spacing:.5px}
+  #panel ul{margin:0;padding-left:18px;font-size:12.5px;color:#c9cdd8;line-height:1.6}
+  #legend{position:absolute;bottom:14px;left:14px;background:rgba(23,26,35,.9);border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:11px;display:flex;gap:14px;flex-wrap:wrap;max-width:600px}
+  .lg{display:flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  #hint{position:absolute;top:14px;left:14px;font-size:11px;color:var(--muted);background:rgba(23,26,35,.85);padding:6px 10px;border-radius:6px;border:1px solid var(--line)}
+  #empty{color:var(--muted);font-size:13px}
+  #zoomCtrl{position:absolute;top:14px;right:14px;display:flex;flex-direction:column;gap:4px}
+  #zoomCtrl button{width:28px;height:28px;background:var(--panel);border:1px solid var(--line);color:#fff;border-radius:6px;cursor:pointer;font-size:15px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="graphWrap">
+    <svg id="svg"><defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5a6072"/>
+      </marker></defs>
+      <g id="viewport"><g id="edges"></g><g id="nodes"></g></g>
+    </svg>
+    <div id="hint">Scroll to zoom · drag to pan · click a node</div>
+    <div id="zoomCtrl"><button id="zin">+</button><button id="zout">−</button><button id="zreset">⤾</button></div>
+    <div id="legend"></div>
+  </div>
+  <div id="panel"><div id="empty">Click any node to see details — files, classes, functions, agents, tools, frontend components and API calls, with their real execution relationships.</div></div>
+</div>
+
+<script>
+const TYPES = {
+  file:{c:'var(--file)',label:'File / Module'},
+  agent:{c:'var(--agent)',label:'Agent (class)'},
+  func:{c:'var(--func)',label:'Function'},
+  tool:{c:'var(--tool)',label:'Tool'},
+  frontend:{c:'var(--frontend)',label:'Frontend'},
+  server:{c:'var(--server)',label:'Server / API'},
+  external:{c:'var(--external)',label:'External Service'},
+  data:{c:'var(--data)',label:'Data'},
+};
+
+const nodes = [
+  {id:'csv', t:'data', x:40, y:120, w:150, h:44, label:'holdings.csv', sub:'sample_data/', path:'sample_data/holdings.csv',
+   desc:'Raw portfolio CSV (ticker, sector, qty, buy/current price, holding_months). Read once into a pandas DataFrame.'},
+  {id:'normalizer', t:'file', x:40, y:220, w:170, h:44, label:'csv_normalizer.py', sub:'root', path:'csv_normalizer.py',
+   desc:'Maps arbitrary CSV headers to the canonical schema via alias matching, coerces values (₹, commas, "3y"→months), skips bad rows with warnings. Falls back to LLM-assisted header mapping (--llm-map) via llm_client.'},
+  {id:'main', t:'file', x:300, y:170, w:160, h:50, label:'main.py', sub:'CLI entry point', path:'main.py',
+   desc:'Orchestrates the whole pipeline: loads CSV via csv_normalizer → pandas DataFrame → runs Analyst → Risk → Advisor → interactive Q&A loop. Handles CLI flags (--csv, --no-qa, --model, --llm-map), the what-if simulation, and optional matplotlib graphs.'},
+  {id:'qaloop', t:'func', x:300, y:280, w:150, h:38, label:'run_qa_loop()', sub:'in main.py', path:'main.py',
+   desc:'Interactive multi-turn Q&A after the report. Keeps a growing conversation_history list and calls llm_client.chat_multiturn() each turn so context persists across questions.'},
+  {id:'whatif', t:'func', x:470, y:280, w:170, h:38, label:'what-if simulation', sub:'in main.py', path:'main.py',
+   desc:'Clones the DataFrame, sells % of one holding, reallocates into another holding/BONDS/GOLD/CASH, re-runs the deterministic calculations and re-runs the Advisor in hypothetical mode. Original CSV/portfolio untouched.'},
+
+  {id:'analyst', t:'agent', x:560, y:70, w:190, h:50, label:'AnalystAgent', sub:'agents/analyst_agent.py', path:'agents/analyst_agent.py',
+   desc:'Facts only. LLM decides which tools to call (calculate_returns, calculate_allocation); Python executes them. Outputs narrative_findings (prose) + structured_findings (dict) — only the dict is passed downstream. temperature=0.1.'},
+  {id:'risk', t:'agent', x:800, y:70, w:180, h:50, label:'RiskAgent', sub:'agents/risk_agent.py', path:'agents/risk_agent.py',
+   desc:'Sits between Analyst and Advisor. Calls estimate_tax_impact() via real tool-calling, then computes HHI (Σ sector_weight²), tax drag, and return dispersion. Outputs risk_facts (dict, authoritative) + risk_report (prose). temperature=0.2.'},
+  {id:'advisor', t:'agent', x:1020, y:70, w:180, h:50, label:'AdvisorAgent', sub:'agents/advisor_agent.py', path:'agents/advisor_agent.py',
+   desc:'No tools — pure reasoning over structured_findings + risk_facts. Forced to cite actual numbers back (citation-grounding), produces 1-2 suggestions, always ends with a "not financial advice" disclaimer. temperature=0.3.'},
+
+  {id:'retcalc', t:'tool', x:560, y:0, w:190, h:40, label:'return_calculator.py', sub:'Tool 1', path:'tools/return_calculator.py',
+   desc:'calculate_returns(): cost_basis = qty×buy_price, current_value = qty×current_price, gain_loss and gain_loss_pct per holding, plus portfolio totals and best/worst performer.'},
+  {id:'alloc', t:'tool', x:560, y:150, w:190, h:40, label:'allocation_breakdown.py', sub:'Tool 2', path:'tools/allocation_breakdown.py',
+   desc:'calculate_allocation(): groups holdings by sector/asset_class as % of current value, flags any sector over 40% concentration.'},
+  {id:'taxest', t:'tool', x:800, y:150, w:190, h:40, label:'tax_estimator.py', sub:'Tool 3', path:'tools/tax_estimator.py',
+   desc:'estimate_tax_impact(): holding_months≥12 → LTCG flat 10%, else STCG 20% (illustrative). Computes per-holding tax, total tax, blended effective rate. Losses do not offset gains.'},
+
+  {id:'llmclient', t:'file', x:1020, y:200, w:180, h:60, label:'llm_client.py', sub:'chat_completion · chat_multiturn · run_tool_loop', path:'llm_client.py',
+   desc:'Thin Groq API wrapper (OpenAI-compatible). run_tool_loop() drives the agentic function-calling cycle: send prompt+schemas → model requests a tool → Python executes it → result fed back as a tool message → model narrates. chat_multiturn() powers the Q&A loop with persistent history.'},
+  {id:'groq', t:'external', x:1020, y:330, w:180, h:44, label:'Groq API', sub:'external LLM service', path:'api.groq.com',
+   desc:'Hosted open-weight models on Groq LPU hardware (default openai/gpt-oss-20b, override with --model). Auto-retries with backoff on 429 rate limits. All three agents and the Q&A loop route through here.'},
+
+  {id:'serve', t:'server', x:300, y:400, w:170, h:44, label:'serve.py', sub:'local demo server', path:'serve.py',
+   desc:'Serves the static docs/ site and exposes GET /api/config, which hands the browser a Groq key from the server env/.env — so the key never sits in a committed file. If unreachable, the page auto-falls back to "paste your own key".'},
+
+  {id:'index', t:'frontend', x:60, y:520, w:170, h:44, label:'docs/index.html', sub:'web app shell', path:'docs/index.html',
+   desc:'Static GitHub Pages entry point: CSV upload/paste UI, tabbed report view (Analyst/Risk/Advisor/Q&A), and a sticky "Portfolio visuals" panel of hand-drawn SVG charts.'},
+  {id:'appjs', t:'frontend', x:280, y:520, w:150, h:44, label:'app.js', sub:'docs/js/', path:'docs/js/app.js',
+   desc:'Orchestrates the browser pipeline: parses uploaded CSV, calls normalize.js, runs the same Analyst→Risk→Advisor sequence via agents.js/groq.js, wires up the UI and Q&A panel.'},
+  {id:'agentsjs', t:'frontend', x:460, y:520, w:150, h:44, label:'agents.js', sub:'docs/js/', path:'docs/js/agents.js',
+   desc:'JS mirror of the three agent prompts, step sequencing, and Q&A context building — the browser-side counterpart of the agents/ package.'},
+  {id:'toolsjs', t:'frontend', x:640, y:520, w:150, h:44, label:'tools.js', sub:'docs/js/', path:'docs/js/tools.js',
+   desc:'Re-implements the 3 Python tools plus HHI/dispersion/tax-drag math in JS — deterministic, same numbers as the CLI.'},
+  {id:'normjs', t:'frontend', x:820, y:520, w:150, h:44, label:'normalize.js', sub:'docs/js/', path:'docs/js/normalize.js',
+   desc:'Browser mirror of csv_normalizer.py: header/alias matching, value coercion, skip+warn, plus llmMapCsv() for the "Try AI-assisted mapping" button.'},
+  {id:'groqjs', t:'frontend', x:1000, y:520, w:150, h:44, label:'groq.js', sub:'docs/js/', path:'docs/js/groq.js',
+   desc:'Browser client for the Groq API: groqChat(), the function-calling runToolLoop(), and chatMultiturn() for the Q&A loop — talks to Groq directly from the browser using either the server-provided or user-pasted key.'},
+];
+
+const edges = [
+  ['csv','normalizer','read by'],
+  ['normalizer','main','normalized DataFrame'],
+  ['main','analyst','structured_findings request'],
+  ['analyst','retcalc','tool call'],
+  ['analyst','alloc','tool call'],
+  ['analyst','risk','structured_findings'],
+  ['risk','taxest','tool call'],
+  ['risk','advisor','structured_findings + risk_facts'],
+  ['advisor','qaloop','advice → Q&A context'],
+  ['qaloop','whatif','optional'],
+  ['analyst','llmclient','chat_completion / run_tool_loop'],
+  ['risk','llmclient','chat_completion / run_tool_loop'],
+  ['advisor','llmclient','chat_completion'],
+  ['qaloop','llmclient','chat_multiturn'],
+  ['llmclient','groq','HTTPS request'],
+  ['main','serve','optional: launches web build'],
+  ['serve','index','serves static files'],
+  ['serve','groqjs','/api/config → key'],
+  ['index','appjs','loads'],
+  ['appjs','normjs','parses CSV'],
+  ['appjs','agentsjs','builds prompts'],
+  ['appjs','toolsjs','runs JS tools'],
+  ['agentsjs','groqjs','uses'],
+  ['toolsjs','groqjs','tool results'],
+  ['groqjs','groq','HTTPS request (browser→Groq)'],
+];
+
+const nodeById = Object.fromEntries(nodes.map(n=>[n.id,n]));
+const svg = document.getElementById('svg');
+const viewport = document.getElementById('viewport');
+const nodesLayer = document.getElementById('nodes');
+const edgesLayer = document.getElementById('edges');
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag,attrs){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+function edgePath(a,b){
+  const ax=a.x+a.w/2, ay=a.y+a.h, bx=b.x+b.w/2, by=b.y;
+  // choose horizontal-ish connection if roughly same row
+  if (Math.abs(a.y-b.y) < 20) {
+    const y = a.y+a.h/2;
+    const x1 = a.x+a.w, x2=b.x;
+    const midx=(x1+x2)/2;
+    return `M${x1},${y} C${midx},${y} ${midx},${b.y+b.h/2} ${x2},${b.y+b.h/2}`;
+  }
+  const midy=(ay+by)/2;
+  return `M${ax},${ay} C${ax},${midy} ${bx},${midy} ${bx},${by}`;
+}
+
+edges.forEach(([f,tId,label])=>{
+  const a=nodeById[f], b=nodeById[tId];
+  const p = el('path',{class:'edge','data-a':f,'data-b':tId,d:edgePath(a,b)});
+  edgesLayer.appendChild(p);
+});
+
+nodes.forEach(n=>{
+  const g = el('g',{class:'node','data-id':n.id});
+  g.appendChild(el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:8,fill:TYPES[n.t].c}));
+  const t1 = el('text',{x:n.x+10,y:n.y+n.h/2 - (n.sub?4:-4)});
+  t1.textContent = n.label; g.appendChild(t1);
+  if(n.sub){const t2=el('text',{class:'sub',x:n.x+10,y:n.y+n.h/2+11}); t2.textContent=n.sub; g.appendChild(t2);}
+  g.addEventListener('click',()=>selectNode(n.id));
+  nodesLayer.appendChild(g);
+});
+
+function selectNode(id){
+  document.querySelectorAll('.node').forEach(g=>g.classList.toggle('selected', g.dataset.id===id));
+  document.querySelectorAll('.edge').forEach(p=>{
+    p.classList.toggle('highlight', p.dataset.a===id || p.dataset.b===id);
+  });
+  const n = nodeById[id];
+  const incoming = edges.filter(e=>e[1]===id).map(e=>`<li><b>${nodeById[e[0]].label}</b> → here <span style="color:var(--muted)">(${e[2]})</span></li>`).join('');
+  const outgoing = edges.filter(e=>e[0]===id).map(e=>`<li>here → <b>${nodeById[e[1]].label}</b> <span style="color:var(--muted)">(${e[2]})</span></li>`).join('');
+  document.getElementById('panel').innerHTML = `
+    <h2>${n.label}</h2>
+    <span class="tag" style="background:${TYPES[n.t].c};color:#0b0d12">${TYPES[n.t].label}</span>
+    <div class="path">${n.path}</div>
+    <p>${n.desc}</p>
+    ${incoming?`<h4>Called by / receives from</h4><ul>${incoming}</ul>`:''}
+    ${outgoing?`<h4>Calls / sends to</h4><ul>${outgoing}</ul>`:''}
+  `;
+}
+
+// legend
+const legend = document.getElementById('legend');
+Object.entries(TYPES).forEach(([k,v])=>{
+  const d=document.createElement('div'); d.className='lg';
+  d.innerHTML = `<span class="dot" style="background:${v.c}"></span>${v.label}`;
+  legend.appendChild(d);
+});
+
+// pan & zoom
+let scale=0.85, tx=20, ty=20, isDown=false, sx=0, sy=0;
+function applyTransform(){ viewport.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`); }
+applyTransform();
+const wrap = document.getElementById('graphWrap');
+wrap.addEventListener('mousedown', e=>{isDown=true; sx=e.clientX-tx; sy=e.clientY-ty; wrap.classList.add('grabbing');});
+window.addEventListener('mouseup', ()=>{isDown=false; wrap.classList.remove('grabbing');});
+window.addEventListener('mousemove', e=>{ if(!isDown) return; tx=e.clientX-sx; ty=e.clientY-sy; applyTransform(); });
+wrap.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const delta = e.deltaY>0? 0.9:1.1;
+  scale = Math.min(2.5, Math.max(0.3, scale*delta));
+  applyTransform();
+},{passive:false});
+document.getElementById('zin').onclick=()=>{scale=Math.min(2.5,scale*1.2);applyTransform();};
+document.getElementById('zout').onclick=()=>{scale=Math.max(0.3,scale*0.8);applyTransform();};
+document.getElementById('zreset').onclick=()=>{scale=0.85;tx=20;ty=20;applyTransform();};
+</script>
+</body>
+</html>
