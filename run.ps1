@@ -18,5 +18,5 @@ if (-not (Test-Path ".env") -and -not $env:GROQ_API_KEY) {
 
 $proc = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "serve.py" -PassThru -NoNewWindow
 Start-Sleep -Seconds 1
-Start-Process "http://localhost:8000"
+Start-Process "http://localhost:8080"
 $proc.WaitForExit()

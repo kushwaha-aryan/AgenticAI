@@ -91,7 +91,28 @@ function updateKeyControls() {
   }
 }
 
+function notifyNoDemoServer() {
+  state.providedKey = null;
+  keySourceManual.checked = true;
+  updateKeyControls();
+  if (location.protocol !== "file:") {
+    keyStatus.textContent =
+      "No demo server detected (open via `python serve.py` to auto-load the env key). " +
+      "Paste your own Groq key to continue - it stays in your browser only.";
+    apiKeyInput.focus();
+  } else if (!state.apiKey) {
+    keyStatus.textContent =
+      "Opened directly from your files, so the server key isn't reachable. Paste your own Groq key once — " +
+      "it's saved in this browser for this page. Or run `python serve.py` and open http://127.0.0.1:8080 for the env key.";
+    apiKeyInput.focus();
+  }
+}
+
 async function loadProvidedKey() {
+  if (location.protocol === "file:") {
+    notifyNoDemoServer();
+    return;
+  }
   try {
     const res = await fetch("/api/config", { cache: "no-store" });
     if (!res.ok) {
@@ -106,12 +127,7 @@ async function loadProvidedKey() {
     keySourceEnv.checked = true;
     updateKeyControls();
   } else {
-    keySourceManual.checked = true;
-    updateKeyControls();
-    keyStatus.textContent =
-      "No demo server detected (open via `python serve.py` to auto-load the env key). " +
-      "Paste your own Groq key below to continue - it stays in your browser only.";
-    apiKeyInput.focus();
+    notifyNoDemoServer();
   }
 }
 

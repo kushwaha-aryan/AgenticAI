@@ -18,5 +18,5 @@ fi
 .venv/bin/python serve.py &
 SERVER_PID=$!
 sleep 1
-xdg-open http://localhost:8000 2>/dev/null || open http://localhost:8000 2>/dev/null || true
+xdg-open http://localhost:8080 2>/dev/null || open http://localhost:8080 2>/dev/null || true
 wait $SERVER_PID

@@ -39,7 +39,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     load_dotenv()
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "8080"))
     host = os.environ.get("HOST", "127.0.0.1")
     server = ThreadingHTTPServer((host, port), Handler)
     has_key = bool(os.environ.get("GROQ_API_KEY"))
