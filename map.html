@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgenticAI · Connection graph and workflow</title>
+<style>
+:root{--bg:#071a33;--line:#2b6cb0;--ink:#e6f4ff;--dim:#8fb4d9;--cy:#7fd1ff;--am:#ffd166}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 "IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+header{padding:14px 20px 4px}h1{font-size:17px;margin:0 0 2px}.note{color:var(--dim);font-size:12px;margin:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;padding:8px 20px;align-items:center}
+.bar button,.steps button{background:#0b2748;color:var(--ink);border:1.5px solid var(--line);border-radius:3px;font:inherit;padding:4px 10px;cursor:pointer}
+.bar button[aria-pressed=true],.steps button[aria-pressed=true]{background:#17508f;border-color:var(--cy)}
+button:focus-visible,.node:focus-visible{outline:2px solid var(--am);outline-offset:2px}
+.steps{display:flex;flex-wrap:wrap;gap:6px;padding:0 20px 8px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:14px;padding:0 20px 24px;align-items:start}
+@media(max-width:1000px){main{grid-template-columns:1fr}}
+.gw{border:1.5px solid var(--line);border-radius:4px;overflow-x:auto;background:rgba(7,26,51,.6)}
+svg{display:block;min-width:900px;width:100%;height:auto}
+.side{background:#0b2748;border:1.5px solid var(--line);border-radius:4px;padding:14px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+.side h2{font-size:15px;margin:0 0 2px;word-break:break-all}.side .path{color:var(--dim);font-size:12px;margin:0 0 8px}
+.side h3{font-size:12px;color:var(--cy);margin:12px 0 4px}.side p{margin:0 0 6px}.side ul{margin:0;padding-left:18px}.side li{margin-bottom:3px}
+.tag{display:inline-block;border:1.5px solid;border-radius:3px;padding:0 7px;font-size:12px;margin-bottom:8px}
+.lk{background:none;border:0;color:var(--am);font:inherit;text-decoration:underline;cursor:pointer;padding:0}
+.node{cursor:pointer}.node rect{stroke-width:1.6}.node:hover rect{filter:brightness(1.3)}.node.sel rect{stroke:#fff;stroke-width:3}
+.nt{font-size:12px;font-weight:700;fill:var(--ink)}.ns{font-size:10px;fill:var(--dim)}
+.ed{fill:none;stroke:#7fd1ff;stroke-width:1.5;opacity:.7}.ed.dash{stroke-dasharray:6 4}
+.ed.hi{stroke:#ffd166;stroke-width:2.6;opacity:1}.ed.dim,.node.dim,.lb.dim,.bd.dim{opacity:.12}
+.ed.flow{stroke-dasharray:8 5;animation:fl 1s linear infinite}@keyframes fl{to{stroke-dashoffset:-13}}
+@media(prefers-reduced-motion:reduce){.ed.flow{animation:none}}
+.lb{font-size:10.5px;fill:#bfe6ff;paint-order:stroke;stroke:#071a33;stroke-width:4px;stroke-linejoin:round}
+.bd circle{fill:#ffd166}.bd text{font-size:10px;font-weight:700;fill:#071a33;text-anchor:middle}
+.lane{font-size:12px;font-weight:700;fill:var(--cy)}
+</style></head><body>
+<header><h1>AgenticAI · What connects to what, and in what order</h1>
+<p class="note">Click a file to see what it does. Pick a workflow, then a step, to see which files and data flows it uses. Arrows show what flows; double arrows are request and response.</p></header>
+<div class="bar" id="bar"></div><div class="steps" id="steps"></div>
+<main><div class="gw"><svg id="g" viewBox="0 0 1300 830" role="img" aria-label="Graph of files and data flows in the AgenticAI repo"></svg></div>
+<aside class="side" id="side" aria-live="polite"></aside></main>
+<script>
+const F={
+'PROJECT_OVERVIEW':['doc','A portfolio health advisor. It turns a CSV of holdings into verified numbers, a risk fact sheet and plain-English advice, then answers follow-up questions.',
+['Problem it solves: a spreadsheet of quantities and prices does not tell a retail investor how well the portfolio is doing or what to do next. This tool computes the facts exactly and then explains them.','Core idea: all arithmetic is done by plain Python or JavaScript. The language model only decides which tool to call and writes the explanation, so its text can never change the numbers.','Pipeline: CSV → clean DataFrame → Analyst agent (returns and allocation) → Risk agent (concentration, dispersion, tax drag) → Advisor agent (1-2 grounded suggestions) → Q&A loop that remembers the conversation.','Two builds share the design: a Python command-line app at the repo root, and a static web app in docs/ that re-implements the tools in JavaScript and calls Groq from the browser.','Extras in the CLI: goal and time-horizon context for the Advisor, optional matplotlib charts, and a what-if simulator that sells part of one holding and reallocates the proceeds.','Tech: Python 3.11+, pandas, the groq SDK, optional matplotlib, vanilla JS and SVG for the web app. Default model: openai/gpt-oss-20b on Groq.','Sample result (sample_data/holdings.csv): portfolio value ₹54,040, gain ₹8,200 (+17.89%), IT sector 44.04%, estimated tax ₹820 at a 10% blended rate.','Not financial advice: the tax maths is a labelled simplification and every Advisor answer ends with a disclaimer.'],[]],
+'main.py':['comp','The command-line entry point. It runs the whole pipeline in order and prints the results.',
+['Run it with python main.py. Options: --csv (default sample_data/holdings.csv), --model (Groq model id), --no-qa (skip the Q&A loop), --llm-map (let the model map unknown CSV headers).','First asks for an investment time horizon in years (blank means 5) and an optional goal label. These become goal_context for the Advisor.','Reads the CSV, cleans it with csv_normalizer, and builds one pandas DataFrame that every later step shares.','If the headers cannot be mapped it prints the first line it found and the expected columns, then exits.','Step 1 Analyst, step 2 Risk, step 3 Advisor, each followed by a [verified by Python] line computed straight from the structured data.','Offers charts, then the Q&A loop, then an optional what-if simulation that prints a before/after comparison.'],
+['csv_normalizer.py','llm_client.py','agents/analyst_agent.py','agents/risk_agent.py','agents/advisor_agent.py','tools/rebalance_simulator.py','tools/chart_view.py']],
+'llm_client.py':['comp','The one place that talks to the Groq API. Every agent goes through it.',
+['load_dotenv reads a .env file next to the code at import time. It never overrides a variable that is already set.','Gets the key from GROQ_API_KEY (or GROQ_KEY) and raises a clear error if it is missing.','chat_completion sends messages, optional tool schemas and a temperature, and returns the model message. chat_multiturn is the same without tools, for Q&A.','run_tool_loop is the function-calling engine: send the schemas, run any requested Python function, append its result as a tool message, and repeat (up to 4 turns) until the model answers in text.','On a rate-limit error it waits for the time Groq asks for (or 1.5 × 2^attempt seconds), up to 4 attempts.','DEFAULT_MODEL is openai/gpt-oss-20b.'],
+['main.py','agents/analyst_agent.py','agents/risk_agent.py','agents/advisor_agent.py','csv_normalizer.py','serve.py']],
+'csv_normalizer.py':['comp','Turns almost any holdings CSV into the standard 8-column table.',
+['Standard columns: ticker, name, sector, asset_class, quantity, buy_price, current_price, holding_months. Only name is optional.','Matches headers against alias lists (for example symbol, qty, market price, months held), ignoring case and punctuation. If two columns claim the same field it reports the ambiguity instead of guessing.','Understands messy values: ₹ and Rs prefixes, thousands commas, (1,000) as a negative, and holding periods like 12, 12m, 1y or 30d.','normalize_text returns the clean rows plus a meta report: mapping used, missing fields, ambiguous headers, skipped row count and per-row warnings.','Rows with missing or non-numeric values are skipped and reported rather than silently dropped.','llm_resolve_mapping (used with --llm-map) asks the model for a JSON column mapping, including prices derived as value ÷ quantity. The result is run through the same deterministic parser to re-validate it.'],
+['main.py','llm_client.py','docs/js/normalize.js','sample_data/holdings.csv']],
+'agents/analyst_agent.py':['agent','Agent 1, the Analyst. It reports facts only: returns and allocation.',
+['The system prompt forbids opinions and recommendations, and says to use the tools for all arithmetic.','Offers the model two tools with no arguments: calculate_returns and calculate_allocation. The data is already bound to them.','The model gets the holdings table as text, calls the tools, and writes a prose summary quoting the numbers they returned. Temperature 0.1.','Returns narrative_findings (the prose), structured_findings (returns and allocation recomputed directly in Python) and the message log.','The Advisor later receives structured_findings, never the prose.'],
+['tools/return_calculator.py','tools/allocation_breakdown.py','llm_client.py','agents/risk_agent.py','main.py']],
+'agents/risk_agent.py':['agent','Agent 3, the Risk agent. It reports risk facts only, with no advice.',
+['Computes three facts in code: HHI (sum of squared sector percentages), return dispersion (best minus worst performer, in percentage points) and tax drag (estimated tax ÷ portfolio value).','HHI labels: 2,500 or more is highly concentrated, 1,500 or more is moderately concentrated, below that is well diversified.','The model receives this verified fact sheet, calls estimate_tax_impact, and writes a risk report that must quote the facts exactly. Temperature 0.2.','Returns risk_report (prose), risk_facts (the authoritative dictionary) and the message log. If the model returns nothing, a fallback line is used.'],
+['tools/tax_estimator.py','agents/analyst_agent.py','agents/advisor_agent.py','llm_client.py','main.py']],
+'agents/advisor_agent.py':['agent','Agent 2, the Advisor, plus the CLI question-and-answer loop. It has no tools.',
+['Receives structured_findings and risk_facts as JSON, plus the investor context (time horizon and goal) if given.','Prompt rules: quote actual percentages and rupee figures, give 1-2 proportionate suggestions, and end with a not-financial-advice disclaimer. Temperature 0.3.','Time horizon is framing only: short horizons weigh volatility and capital preservation more, long horizons tolerate short-term swings.','A hypothetical flag marks a what-if run so the model treats every number as simulated.','run_qa_loop keeps one growing conversation_history list, so follow-up questions remember earlier answers. Type exit, quit or q to leave.'],
+['agents/risk_agent.py','llm_client.py','main.py','tools/rebalance_simulator.py']],
+'tools/return_calculator.py':['tool','Tool 1: works out how each holding and the whole portfolio has performed.',
+['Per holding: cost basis = quantity × buy price, current value = quantity × current price, gain or loss in rupees and as a percentage of cost.','Portfolio totals for cost, value, gain and gain percentage.','Picks the best and worst performer by gain percentage.','Reports both rupees and percentages because 50% on a small position is very different from 1% on a large one.','All figures are rounded to 2 decimals.'],
+['agents/analyst_agent.py','docs/js/tools.js']],
+'tools/allocation_breakdown.py':['tool','Tool 2: shows how the portfolio is split across sectors and asset classes.',
+['Uses current value, not what was originally invested, because risk is about today’s exposure.','Returns sector and asset-class percentages, sorted largest first.','Names the top sector and flags it when it is above 40% (CONCENTRATION_THRESHOLD_PCT).','Also returns the total current value.'],
+['agents/analyst_agent.py','docs/js/tools.js']],
+'tools/tax_estimator.py':['tool','Tool 3: a simplified estimate of capital-gains tax if everything were sold today.',
+['Holdings with no gain pay nothing. A gain on a holding of 12 months or more is taxed at a flat 10% (long-term). Anything shorter is taxed at 20% (short-term).','Losses are not offset against gains.','Returns per-holding category, gain, rate and tax, plus total taxable gains, total estimated tax and the blended effective rate.','Includes an assumptions block and a disclaimer saying it is illustrative and not tax advice.','On the sample data: ₹820 tax on ₹8,200 of gains, a 10% blended rate.'],
+['agents/risk_agent.py','docs/js/tools.js']],
+'tools/rebalance_simulator.py':['tool','The what-if engine: sell part of one holding and move the money somewhere else.',
+['simulate_rebalance(df, ticker, sell_pct, reallocate_into) returns a new DataFrame. The original data and CSV are never changed.','Checks the inputs: the portfolio is not empty, the percentage is between 0 and 100, the ticker exists, and the destination is a different holding or one of BONDS, GOLD or CASH.','Defensive assets are built-in rows priced at 100.','Proceeds = quantity sold × current price. The source quantity shrinks (the row disappears if fully sold) and the destination quantity grows, or a new row is added.','main.py recomputes returns, allocation and risk on the result and asks the Advisor to comment, marked hypothetical.'],
+['main.py','agents/advisor_agent.py']],
+'tools/chart_view.py':['tool','Optional charts for the CLI, drawn with matplotlib.',
+['show_allocation_pie draws the sector allocation.','show_gainloss_bar draws gain or loss % per holding, green for gains and red for losses.','show_rebalance_comparison draws before and after pies side by side for the what-if.','matplotlib is imported only when needed; if it is missing, a clear message tells you to install it.','Tries to bring the chart window to the front.'],
+['main.py']],
+'serve.py':['comp','A small local web server for the demo.',
+['Serves the docs/ folder using Python’s built-in HTTP server.','Adds one endpoint, GET /api/config, which returns the Groq key from the environment or .env as JSON (404 if no key is set), with caching turned off.','Listens on 127.0.0.1 port 8080 by default; HOST and PORT environment variables change that.','On start it prints the address and whether a key was found.','This lets the web page use the key without the user pasting it.'],
+['docs/index.html','docs/js/app.js','llm_client.py','.env.example']],
+'docs/index.html':['web','The web app page.',
+['Card 1: choose the key source, either the demo server’s key or paste your own (password field with Show/Hide).','Card 2: a CSV text box with Upload CSV, Load sample data and Analyze portfolio buttons. A Try AI-assisted mapping button appears only when headers cannot be matched.','Card 3: tabs for Analyst, Risk, Advisor and Q&A that unlock as each agent finishes.','A side panel for portfolio visuals and a question box for follow-ups.','Loads the style sheet and the scripts in docs/js/.'],
+['docs/style.css','docs/js/app.js','docs/js/groq.js','docs/js/md.js','docs/js/charts.js']],
+'docs/style.css':['web','The styling for the web app.',['Controls the look of the cards, tabs, buttons, report text and the visuals panel.'],['docs/index.html']],
+'docs/js/app.js':['web','The web app’s controller. It wires the page together and runs the pipeline.',
+['Key handling: asks /api/config for the server key, or uses a pasted key saved in the browser’s localStorage. If the page is opened without the server it switches to the paste option.','CSV input: paste, upload (read in the browser) or load the built-in sample; normalizeCsvText cleans it and shows a message about mapped columns and skipped rows.','If headers are missing or ambiguous it shows the AI-mapping button and applies the model’s mapping.','Analyze runs Analyst, then Risk, then Advisor, filling each tab and showing the verified-facts lines.','Then draws the visuals and enables Q&A, where each question is added to the Advisor’s message history and sent to the model.','A busy flag stops double submits.'],
+['docs/js/agents.js','docs/js/normalize.js','docs/js/groq.js','docs/js/md.js','docs/js/charts.js','serve.py']],
+'docs/js/agents.js':['web','The three agents, written for the browser.',
+['Holds the Analyst, Risk and Advisor system prompts and the tool schemas.','runAnalyst: sends the rows to the model with two tools, then returns the narrative plus findings recomputed in code.','runRisk: computes HHI, dispersion and tax drag, gives the model the fact sheet and the tax tool, and returns report and facts.','runAdvisor: sends the findings as JSON and returns 1-2 grounded suggestions with a disclaimer (temperature 0.3).','Same temperatures as the Python agents: 0.1, 0.2, 0.3.'],
+['docs/js/app.js','docs/js/groq.js','docs/js/tools.js']],
+'docs/js/groq.js':['web','The browser’s connection to the Groq API.',
+['groqChat posts to api.groq.com with the key in an Authorization header.','Retries on network errors, and on rate limits waits the time Groq reports.','chatMultiturn sends a growing message history for Q&A (temperature 0.3).','runToolLoop is the browser version of the function-calling loop: run requested tools, send results back, up to 4 turns.','Default model openai/gpt-oss-20b.'],
+['docs/js/agents.js','docs/js/app.js','llm_client.py']],
+'docs/js/tools.js':['web','The three tools and the risk maths, rewritten in JavaScript.',
+['computeReturns, computeAllocation and estimateTax follow the Python tools line by line.','computeRiskFacts calculates HHI, dispersion and tax drag with the same thresholds.','Same constants: 40% concentration flag, 12-month long-term cutoff, 10% and 20% rates.','Because everything runs in the browser, the numbers never leave your machine except in the prompt text sent to Groq.'],
+['tools/return_calculator.py','tools/allocation_breakdown.py','tools/tax_estimator.py','docs/js/agents.js']],
+'docs/js/normalize.js':['web','The browser version of the CSV normalizer.',
+['normalizeCsvText turns pasted or uploaded CSV text into clean rows plus a report of mapped columns, missing fields and skipped rows.','llmMapCsv asks the model to map unknown headers; the result is re-checked by the normal parser.','Powers the Try AI-assisted mapping button.'],
+['csv_normalizer.py','docs/js/app.js','docs/js/groq.js']],
+'docs/js/md.js':['web','A small markdown-to-HTML renderer for model replies.',
+['Supports headings, bullet and numbered lists, tables, code blocks, quotes, bold, italic and https links.','All text is HTML-escaped first, then formatting is applied.','renderMarkdown(element, text) fills a page element.'],
+['docs/js/app.js']],
+'docs/js/charts.js':['web','Draws the “Portfolio visuals” panel from the verified numbers.',
+['Summary chips: value, net gain, estimated tax and HHI.','An asset-class donut, sector bars, gain/loss bars per holding and tax bars per holding.','Risk meters for HHI, return dispersion and tax drag with colour bands.','renderVisuals(element, findings, riskFacts) builds it all as HTML and SVG.'],
+['docs/js/app.js']],
+'docs/http-client.env.json':['store','An editor settings file (JetBrains HTTP client).',['Holds a placeholder value only; the app does not use it.'],[]],
+'sample_data/holdings.csv':['store','A sample portfolio of 7 holdings for demos.',
+['TCS, Infosys, HDFC Bank, NTPC, ITC, Mahindra & Mahindra and an HDFC corporate bond fund.','Columns match the standard schema, with holding periods from 12 to 60 months.','Gives total gain ₹8,200 and estimated tax ₹820, which the README quotes.'],['main.py','csv_normalizer.py']],
+'.env.example':['store','A template for your key file.',['Shows GROQ_API_KEY=gsk_your_key_here. Copy it to .env and fill in your key.','Only this placeholder is committed; the real .env is not.'],['llm_client.py','serve.py']],
+'.gitignore':['store','Tells git which files to leave out.',['Ignores .venv/, __pycache__/, *.pyc, .idea/, .DS_Store and .env.'],[]],
+'requirements.txt':['store','The Python packages to install.',['groq (API client), pandas (the holdings table) and matplotlib (charts).','Install with pip install -r requirements.txt.'],['llm_client.py','csv_normalizer.py']],
+'run.ps1':['doc','One-command web demo launcher for Windows.',['Per the README: creates a virtual environment on first run, installs requirements, starts serve.py and opens the browser.'],['serve.py']],
+'run.sh':['doc','One-command web demo launcher for macOS and Linux.',['Creates .venv and installs requirements on first run.','Warns if no GROQ_API_KEY is found in .env or the environment.','Starts serve.py and opens http://localhost:8080.'],['serve.py']],
+'README.md':['doc','The project write-up.',['Explains why there are separate agents, how tool-calling works, each agent and tool, setup and run commands, accepted CSV formats, the web build and its trade-offs, and talking points for a viva.'],[]],
+'codebase_map.html':['doc','An interactive codebase map already in the repo.',['A dark graph of the code with a details panel, similar in spirit to this one.'],[]],
+'agents/__init__.py':['doc','Empty file that makes agents/ a Python package.',[],[]],
+'tools/__init__.py':['doc','Empty file that makes tools/ a Python package.',[],[]],
+'.env':['store','Your local secrets file. It is not in the repo; you create it from .env.example.',['Holds GROQ_API_KEY.','Read by llm_client.load_dotenv() for the CLI and by serve.py for the web demo.'],['.env.example','llm_client.py','serve.py']],
+'Groq API':['ext','The external LLM service (api.groq.com).',['Receives chat requests from llm_client.py (CLI) and groq.js (browser).','Returns either text or tool_calls that the app then executes locally.','Default model openai/gpt-oss-20b; --model can pick a larger one such as openai/gpt-oss-120b.','Free-tier rate limits are handled by retry logic in both clients.'],['llm_client.py','docs/js/groq.js']]
+};
+
+const KIND={agent:'Agent',tool:'Deterministic tool',comp:'Core / CLI',web:'Web build (docs/)',store:'Data / config',doc:'Docs / scripts',ext:'External service'};
+const COL={agent:['#fff','#154f8c'],tool:['#9be7c4','#0c3f52'],comp:['#7fd1ff','#0e3566'],web:['#ff9f6b','#3a2f4a'],store:['#ffd166','#26385a'],doc:['#8fb4d9','#1a3558'],ext:['#ff9f6b','#3a2a3f']};
+const H=46;
+// key,x,y,w,label,sub
+const NL=[
+['sample_data/holdings.csv',20,60,165,'holdings.csv','input data'],['.env',260,60,165,'.env','GROQ_API_KEY'],
+['llm_client.py',600,60,165,'llm_client.py','Groq calls + retries'],['Groq API',1000,60,165,'Groq API','external LLM'],
+['main.py',20,210,165,'main.py','CLI orchestrator'],['csv_normalizer.py',260,210,165,'csv_normalizer.py','CSV → DataFrame'],
+['agents/analyst_agent.py',490,210,165,'analyst_agent.py','temp 0.1 · facts'],['agents/risk_agent.py',730,210,165,'risk_agent.py','temp 0.2 · risk facts'],
+['agents/advisor_agent.py',970,210,165,'advisor_agent.py','temp 0.3 · advice + Q&A'],
+['tools/chart_view.py',20,340,165,'chart_view.py','matplotlib charts'],['tools/return_calculator.py',395,340,155,'return_calculator.py','returns, totals'],
+['tools/allocation_breakdown.py',570,340,155,'allocation_breakdown.py','sector %, flag'],['tools/tax_estimator.py',735,340,155,'tax_estimator.py','LTCG / STCG'],
+['tools/rebalance_simulator.py',970,340,165,'rebalance_simulator.py','what-if copy'],
+['serve.py',20,500,165,'serve.py','demo server'],['docs/index.html',20,620,165,'index.html','page + tabs'],
+['docs/js/app.js',260,560,165,'app.js','web orchestrator'],['docs/js/normalize.js',520,490,165,'normalize.js','CSV mirror'],
+['docs/js/agents.js',520,590,165,'agents.js','3 agents (JS)'],['docs/js/tools.js',760,590,165,'tools.js','tools (JS)'],
+['docs/js/groq.js',520,690,165,'groq.js','browser Groq client'],['docs/js/md.js',260,690,165,'md.js','markdown render'],
+['docs/js/charts.js',20,740,165,'charts.js','SVG visuals']];
+const NM={};NL.forEach(n=>NM[n[0]]={x:n[1],y:n[2],w:n[3]});
+const E=[];const e=(id,f,t,pts,label,lx,ly,an,o={})=>E.push(Object.assign({id,f,t,pts,label,lx,ly,an:an||'middle'},o));
+e('e1','sample_data/holdings.csv','main.py',[[100,106],[100,210]],'CSV text',108,160,'start');
+e('e2','main.py','csv_normalizer.py',[[185,233],[260,233]],'CSV ⇄ rows',222,226,'middle',{both:1});
+e('e3','.env','llm_client.py',[[425,83],[600,75]],'GROQ_API_KEY',512,62);
+e('e4','csv_normalizer.py','llm_client.py',[[425,222],[455,222],[455,100],[600,96]],'--llm-map: header mapping',462,128,'start',{dash:1});
+e('e5','main.py','agents/analyst_agent.py',[[150,210],[150,185],[540,185],[540,210]],'DataFrame + model',330,178);
+e('e6','agents/analyst_agent.py','agents/risk_agent.py',[[655,233],[730,233]],'findings',692,226);
+e('e7','agents/risk_agent.py','agents/advisor_agent.py',[[895,233],[970,233]],'risk_facts',932,226);
+e('e8','agents/analyst_agent.py','tools/return_calculator.py',[[520,256],[472,340]],'calculate_returns()',462,305,'end',{both:1});
+e('e9','agents/analyst_agent.py','tools/allocation_breakdown.py',[[625,256],[647,340]],'calculate_allocation()',654,313,'start',{both:1});
+e('e10','agents/risk_agent.py','tools/tax_estimator.py',[[812,256],[812,340]],'estimate_tax_impact()',820,313,'start',{both:1});
+e('e11','main.py','tools/chart_view.py',[[60,256],[60,340]],'findings → charts',68,305,'start');
+e('e12','main.py','tools/rebalance_simulator.py',[[140,256],[140,272],[1022,272],[1022,340]],'ticker, %, destination',1014,330,'end');
+e('e13','tools/rebalance_simulator.py','agents/advisor_agent.py',[[1082,340],[1082,256]],'simulated DataFrame',1090,300,'start');
+e('e14','agents/analyst_agent.py','llm_client.py',[[590,210],[650,106]],'prompt ⇄ tool_calls',600,172,'end',{both:1});
+e('e15','agents/risk_agent.py','llm_client.py',[[800,210],[715,106]],'prompt ⇄ tool_calls',770,160,'start',{both:1});
+e('e16','agents/advisor_agent.py','llm_client.py',[[1000,210],[745,106]],'advice + Q&A turns',1010,195,'start',{both:1});
+e('e17','llm_client.py','Groq API',[[765,83],[1000,83]],'chat completions (HTTPS)',882,76,'middle',{both:1});
+e('ee','.env','serve.py',[[260,83],[222,83],[222,470],[100,470],[100,500]],'GROQ_API_KEY',230,400,'start');
+e('w1','serve.py','docs/index.html',[[100,546],[100,620]],'serves docs/',108,590,'start');
+e('w2','docs/index.html','docs/js/app.js',[[185,643],[260,596]],'scripts',205,664,'start');
+e('w3','docs/js/app.js','serve.py',[[260,573],[185,535]],'GET /api/config → key',200,520,'start');
+e('w4','docs/js/app.js','docs/js/normalize.js',[[425,573],[520,513]],'CSV text ⇄ rows',462,531,'end',{both:1});
+e('w5','docs/js/app.js','docs/js/agents.js',[[425,598],[520,613]],'run pipeline',472,630);
+e('w6','docs/js/agents.js','docs/js/tools.js',[[685,613],[760,613]],'tool calls',722,606,'middle',{both:1});
+e('w7','docs/js/agents.js','docs/js/groq.js',[[602,636],[602,690]],'messages',610,666,'start');
+e('w8','docs/js/groq.js','Groq API',[[685,713],[1250,713],[1250,83],[1165,83]],'HTTPS POST + Bearer key',960,706);
+e('w9','docs/js/app.js','docs/js/md.js',[[342,606],[342,690]],'model markdown',350,650,'start');
+e('w10','docs/js/app.js','docs/js/charts.js',[[300,606],[110,740]],'verified facts',125,712);
+e('w11','docs/js/app.js','docs/js/groq.js',[[410,606],[520,713]],'Q&A turns',466,664,'end');
+const FL={
+cli:[['Setup','The key comes from the GROQ_API_KEY environment variable or a .env file. llm_client.py reads it with load_dotenv() when it is imported.',['e3']],
+['Load and normalize the CSV','main.py asks for time horizon and goal, reads the CSV, and csv_normalizer.py maps headers and cleans values into a pandas DataFrame. With --llm-map the model can map unknown headers.',['e1','e2','e4']],
+['Analyst agent','analyst_agent.py sends the table to the model with two zero-argument tools. Python runs calculate_returns and calculate_allocation. structured_findings is recomputed in code either way.',['e5','e8','e9','e14','e17']],
+['Risk agent','risk_agent.py computes HHI, return dispersion and tax drag in code, then lets the model call estimate_tax_impact and write the risk report.',['e6','e10','e15','e17']],
+['Advisor agent','advisor_agent.py gets structured_findings and risk_facts (plus goal context), with no tools, and writes 1-2 grounded suggestions ending in a disclaimer.',['e7','e16','e17']],
+['Charts (optional)','On "y", chart_view.py draws the sector pie and gain/loss bar chart with matplotlib.',['e11']],
+['Q&A loop','run_qa_loop keeps one conversation_history list and sends each question through llm_client.chat_multiturn.',['e16','e17']],
+['What-if (optional)','rebalance_simulator.py builds a modified copy of the portfolio. main.py recomputes the numbers and calls the Advisor with hypothetical=True. The original data is never changed.',['e12','e13','e16','e17']]],
+web:[['Server and key','python serve.py serves docs/ and returns GROQ_API_KEY (from the environment or .env) at /api/config. Without the server, the page asks you to paste a key kept in localStorage.',['ee','w1','w2','w3']],
+['Normalize the CSV','app.js passes the pasted or uploaded text to normalize.js, which maps headers and returns clean rows in the browser.',['w4']],
+['Run the agents','app.js runs Analyst, Risk and Advisor from agents.js. tools.js does the maths; groq.js sends the messages to the Groq API.',['w5','w6','w7','w8']],
+['Render the results','Model text goes through md.js (HTML-escaped markdown). charts.js draws the SVG visuals from the verified numbers.',['w9','w10']],
+['Q&A','Each question is appended to the Advisor message history and sent through groq.js chatMultiturn.',['w11','w7','w8']]]};
+const lane={cli:new Set(['e1','e2','e3','e4','e5','e6','e7','e8','e9','e10','e11','e12','e13','e14','e15','e16','e17']),web:new Set(['ee','w1','w2','w3','w4','w5','w6','w7','w8','w9','w10','w11'])};
+const NS='http://www.w3.org/2000/svg',svg=document.getElementById('g');
+const mk=(n,a,p=svg,t)=>{const x=document.createElementNS(NS,n);for(const k in a)x.setAttribute(k,a[k]);if(t!==undefined)x.textContent=t;p.appendChild(x);return x;};
+const df=mk('defs',{});[['a','auto'],['b','auto-start-reverse']].forEach(([id,o])=>{const m=mk('marker',{id,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:o,},df);mk('path',{d:'M0 1L10 5L0 9z',fill:'context-stroke'},m);});
+const gp=mk('pattern',{id:'gr',width:40,height:40,patternUnits:'userSpaceOnUse'},df);mk('path',{d:'M40 0H0V40',fill:'none',stroke:'#1b4f8f','stroke-width':.5,opacity:.5},gp);
+mk('rect',{width:1300,height:830,fill:'url(#gr)'});
+mk('text',{x:20,y:30,class:'lane'},svg,'CLI build (Python): main.py runs the pipeline');
+mk('line',{x1:0,y1:445,x2:1300,y2:445,stroke:'#2b6cb0','stroke-dasharray':'8 5'});
+mk('text',{x:20,y:466,class:'lane'},svg,'Web build (docs/): app.js runs the same pipeline in the browser');
+const edEl={},lbEl={},bdEl={},ndEl={};
+E.forEach(d=>{const p=mk('path',{d:'M'+d.pts.map(q=>q.join(' ')).join('L'),class:'ed'+(d.dash?' dash':''),'marker-end':'url(#a)'});if(d.both)p.setAttribute('marker-start','url(#b)');edEl[d.id]=p;});
+E.forEach(d=>{lbEl[d.id]=mk('text',{x:d.lx,y:d.ly,class:'lb','text-anchor':d.an},svg,d.label);});
+// badges: midpoint of longest segment
+E.forEach(d=>{let b=0,bi=0;for(let i=0;i<d.pts.length-1;i++){const l=Math.hypot(d.pts[i+1][0]-d.pts[i][0],d.pts[i+1][1]-d.pts[i][1]);if(l>b){b=l;bi=i;}}
+ const a=d.pts[bi],c=d.pts[bi+1];const g=mk('g',{class:'bd',display:'none',transform:`translate(${(a[0]+c[0])/2},${(a[1]+c[1])/2})`});mk('circle',{r:9},g);mk('text',{y:3.5},g,'');bdEl[d.id]=g;});
+const side=document.getElementById('side');
+NL.forEach(([k,x,y,w,l,s])=>{const g=mk('g',{class:'node',tabindex:0,role:'button','aria-label':l+': '+s});const kind=F[k][0],c=COL[kind];
+ mk('rect',{x,y,width:w,height:H,rx:3,fill:c[1],stroke:c[0],'stroke-dasharray':kind==='ext'?'7 4':''},g);
+ mk('text',{x:x+10,y:y+20,class:'nt'},g,l);mk('text',{x:x+10,y:y+36,class:'ns'},g,s);
+ g.addEventListener('click',()=>selNode(k));g.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();selNode(k);}});
+ g.addEventListener('mouseenter',()=>hover(k,true));g.addEventListener('mouseleave',()=>hover(k,false));ndEl[k]=g;});
+let st={mode:'all',step:null,sel:null};
+function hover(k,on){if(st.step!==null)return;E.forEach(d=>{if(d.f===k||d.t===k)edEl[d.id].classList.toggle('hi',on);});}
+function paint(){const sd=st.step!==null?FL[st.mode][st.step][2]:null;const act=new Set();
+ E.forEach(d=>{let on=true;if(sd)on=sd.includes(d.id);else if(st.mode!=='all')on=lane[st.mode].has(d.id);
+  const p=edEl[d.id];p.classList.toggle('dim',!on);p.classList.toggle('hi',!!sd&&on);p.classList.toggle('flow',!!sd&&on);lbEl[d.id].classList.toggle('dim',!on);
+  const b=bdEl[d.id];let n='';if(st.mode!=='all'&&on){const i=FL[st.mode].findIndex(s=>s[2].includes(d.id));if(i>=0)n=String(st.mode==='cli'?i:i+1);}
+  b.setAttribute('display',n?'':'none');b.classList.toggle('dim',!on);b.lastChild.textContent=n;if(on){act.add(d.f);act.add(d.t);}});
+ Object.keys(ndEl).forEach(k=>{ndEl[k].classList.toggle('dim',(sd||st.mode!=='all')&&!act.has(k));ndEl[k].classList.toggle('sel',st.sel===k);});}
+const bar=document.getElementById('bar'),stepsEl=document.getElementById('steps');
+[['all','All connections'],['cli','CLI workflow'],['web','Web workflow']].forEach(([m,t])=>{const b=document.createElement('button');b.textContent=t;b.setAttribute('aria-pressed',m==='all');b.onclick=()=>{st.mode=m;st.step=null;[...bar.children].forEach(x=>x.setAttribute('aria-pressed',x===b));buildSteps();paint();if(m==='all')showReview();else showFlow(m);};bar.append(b);});
+function buildSteps(){stepsEl.innerHTML='';if(st.mode==='all')return;FL[st.mode].forEach((s,i)=>{const b=document.createElement('button');b.textContent=(st.mode==='cli'?i:i+1)+' · '+s[0];b.setAttribute('aria-pressed','false');b.onclick=()=>{st.step=i;[...stepsEl.children].forEach(x=>x.setAttribute('aria-pressed',x===b));paint();showStep(i);};stepsEl.append(b);});}
+const T=(tag,txt,cls)=>{const x=document.createElement(tag);x.textContent=txt;if(cls)x.className=cls;return x;};
+function list(items){const u=document.createElement('ul');items.forEach(i=>u.append(T('li',i)));return u;}
+function showFlow(m){side.innerHTML='';side.append(T('h2',m==='cli'?'CLI workflow':'Web workflow'),T('p',m==='cli'?'Run python main.py. Numbered badges on the arrows show which step uses each flow. Pick a step above to light up its path.':'Run python serve.py and open the page. Numbered badges show the step for each flow. Pick a step above to light up its path.'));}
+function showStep(i){const s=FL[st.mode][i];side.innerHTML='';side.append(T('h2',(st.mode==='cli'?i:i+1)+' · '+s[0]),T('p',s[1]),T('h3','Data flowing in this step'));
+ const u=document.createElement('ul');s[2].forEach(id=>{const d=E.find(x=>x.id===id);const l=document.createElement('li');l.append(document.createTextNode(d.label+': '));[d.f,d.t].forEach((k,j)=>{const b=T('button',k.split('/').pop(),'lk');b.onclick=()=>selNode(k);l.append(b);if(!j)l.append(document.createTextNode(d.both?' ⇄ ':' → '));});u.append(l);});side.append(u);}
+function showReview(){selNode('PROJECT_OVERVIEW',true);}
+function selNode(k,noMark){const [kind,sm,d,c]=F[k];st.sel=noMark?null:k;paint();side.innerHTML='';
+ side.append(T('h2',k.split('/').pop()),T('p',k,'path'));const tg=T('span',KIND[kind],'tag');tg.style.borderColor=COL[kind][0];side.append(tg,T('p',sm));
+ if(d.length)side.append(T('h3','Details'),list(d));
+ const rel=c.filter(x=>F[x]);if(rel.length){side.append(T('h3','Works with'));const u=document.createElement('ul');rel.forEach(x=>{const l=document.createElement('li');const b=T('button',x,'lk');b.onclick=()=>selNode(x);l.append(b);u.append(l);});side.append(u);}}
+paint();showReview();
+</script></body></html>
